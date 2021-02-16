@@ -1,10 +1,11 @@
 from __future__ import annotations
-import time
+
 import dataclasses
 import secrets
+import time
 import typing
 
-from fastapi import FastAPI, Response, Cookie, Query
+from fastapi import Cookie, FastAPI, Query, Response
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
@@ -20,10 +21,10 @@ sessions: typing.Dict[str, Session] = {}
 
 @app.get("/items/", response_class=HTMLResponse)
 async def homepage(
-        response: Response,
-        id: typing.Optional[str] = Cookie(None),
-        logout: typing.Optional[str] = Query(None),
-        ):
+    response: Response,
+    id: typing.Optional[str] = Cookie(None),
+    logout: typing.Optional[str] = Query(None),
+):
     if id not in sessions:
         id = secrets.token_hex(16)
         sessions[id] = Session(time.time())
