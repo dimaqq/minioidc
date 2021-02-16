@@ -184,6 +184,15 @@ body {
   flex-direction: column;
 }
 
+.system {
+  display: flex;
+  margin: 20px 0 60px 0;
+}
+
+#system {
+  flex: auto;
+}
+
 textarea {
   flex: auto;
 }
