@@ -23,12 +23,24 @@ async def homepage():
             <title>Example client that implements OpenID Connect confidential client using code flow</title>
             <link rel="shortcut icon" href="{ICON}"/>
             <script>{JS}</script>
+            <style>{CSS}></style>
         </head>
         <body>
-            <div>FIXME</div>
-            <button onclick="logout">Logout</button>
-            <button onclick="status">Check status</button>
-            <button onclick="test">Test</button>
+            <h1>OpenID Connect test client</h1>
+            <div class="system">
+                <label>System status</label>
+                <div id="system"></div>
+                <button id="logout">Logout</button>
+            </div>
+            <div class="status">
+                <label>Id token claims</label>
+                <label>Access token claims</label>
+                <label>The rest of status</label>
+                <textarea id="id_token" placeholder="..."></textarea>
+                <textarea id="access_token" placeholder="..."></textarea>
+                <textarea id="status-rest" placeholder="..."></textarea>
+            </div>
+            <button id="status">Re-check</button>
         </body>
     </html>
     """.strip()
@@ -74,7 +86,6 @@ def logout(session: Session = Depends(valid_session)):
         del sessions[session.fastapi_token[:8]]
     except KeyError:
         logging.exception("WTF")
-    return RedirectResponse("/")
 
 
 @app.get("/cb", response_class=HTMLResponse)
@@ -141,19 +152,58 @@ const fastapi_token = localStorage.getItem("fastapi_token");
 console.log("FastAPI token is", fastapi_token);
 
 const logout = async () => {
-  await fetch("/logout", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
+  const resp = await fetch("/logout", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
+  const data = await resp.json();
+  console.log("logout", data);
+  await status();
 };
 
 const status = async () => {
-  const rv = await fetch("/status", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
-  console.log(rv);
+  const resp = await fetch("/status", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
+  const data = await resp.json();
+  console.log("status", data);
+  const {id_token, access_token, ...rest} = data;
+  document.querySelector("#id_token").value = JSON.stringify(id_token, null, 2);
+  document.querySelector("#access_token").value = JSON.stringify(access_token, null, 2);
+  document.querySelector("#status-rest").value = JSON.stringify(rest, null, 2);
 };
 
-const test = () => {
-  console.log("test!");
+window.onload = () => {
+  document.querySelector("#logout").onclick = logout;
+  document.querySelector("#status").onclick = status;
+  status();
+  setInterval(status, 1000);
 };
+"""
 
-status();
+CSS = """
+body {
+  width: 1024px;
+  margin: 20px auto 20px auto;
+  display: flex;
+  flex-direction: column;
+}
+
+textarea {
+  flex: auto;
+}
+
+.status {
+  height: 500px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: max-content 1fr max-content;
+  gap: 10px 10px;
+  grid-template-areas:
+    ". . ."
+    ". . ."
+    ". . .";
+}
+
+#status {
+  flex: none;
+  margin: 10px 10px 10px auto;
+}
 """
 
 
