@@ -6,8 +6,9 @@ import secrets
 import time
 from typing import Dict, Optional, Tuple
 
-from fastapi import FastAPI, Query, Response
+from fastapi import Depends, FastAPI, Query, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
@@ -24,14 +25,24 @@ async def homepage():
         </head>
         <body>
             <div>FIXME</div>
-            <button click="logout">Logout</button>
+            <button onclick="logout">Logout</button>
+            <button onclick="status">Check status</button>
+            <button onclick="test">Test</button>
         </body>
     </html>
     """.strip()
 
 
-@app.get("/status")
-async def status():
+auth = HTTPBearer()
+
+
+def foobar(*args, **kw):
+    logging.info("foobar called %s", [args, kw])
+
+
+@app.post("/status")
+async def status(authorization: HTTPAuthorizationCredentials = Depends(auth)):
+    logging.info("got auth %s", authorization)
     return {"access_token": {"fix": "me"}, "id_token": {"fix": "me"}}
 
 
@@ -43,13 +54,19 @@ async def callback(
     error: Optional[str] = Query(None),
     error_description: Optional[str] = Query(None),
 ):
-    fastapi_token = secrets.token_hex(16)
+    fastapi_token = secrets.token_hex(20)
     refresh_token, access_token, id_token = await get_tokens(code)
-    sessions[fastapi_token] = Session(
-        time.time(), refresh_token, access_token, id_token, error, error_description
+    sessions[fastapi_token[:8]] = Session(
+        time.time(),
+        fastapi_token,
+        refresh_token,
+        access_token,
+        id_token,
+        error,
+        error_description,
     )
     cleanup_sessions()
-    return RedirectResponse(f"/#fastapi_token")
+    return RedirectResponse(f"/#{fastapi_token[:8]}")
 
 
 @app.post("/logout")
@@ -71,6 +88,7 @@ class State:
 @dataclasses.dataclass
 class Session:
     created: float
+    fastapi_token: str
     refresh_token: Optional[str]
     access_token: Optional[Dict]
     id_token: Optional[Dict]
@@ -105,7 +123,7 @@ async def get_tokens(code) -> Tuple:
 
 JS = """
 "use strict";
-const new_token = window.location.hash;
+const new_token = window.location.hash.split("#")[1];
 if (new_token) {
   window.location.hash = "";
   localStorage.setItem("fastapi_token", new_token);
@@ -116,6 +134,17 @@ console.log("FastAPI token is", fastapi_token);
 const logout = async () => {
   await fetch("/logout", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
 };
+
+const status = async () => {
+  const rv = await fetch("/status", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
+  console.log(rv);
+};
+
+const test = () => {
+  console.log("test!");
+};
+
+status();
 """
 
 
