@@ -55,15 +55,26 @@ def valid_session(
         session = sessions[authorization.credentials[:8]]
         if not secrets.compare_digest(authorization.credentials, session.fastapi_token):
             raise KeyError()
+        return session
     except KeyError:
         raise HTTPException(403, "Not authenticated")
-    return Session(0, "omg")
 
 
 @app.post("/status")
 async def status(session: Session = Depends(valid_session)):
-    logging.info("got auth %s", authorization)
-    return {"access_token": {"fix": "me"}, "id_token": {"fix": "me"}}
+    tmp = dataclasses.asdict(session)
+    del tmp["fastapi_token"]
+    del tmp["refresh_token"]
+    return tmp
+
+
+@app.post("/logout")
+def logout(session: Session = Depends(valid_session)):
+    try:
+        del sessions[session.fastapi_token[:8]]
+    except KeyError:
+        logging.exception("WTF")
+    return RedirectResponse("/")
 
 
 @app.get("/cb", response_class=HTMLResponse)
@@ -87,17 +98,6 @@ async def callback(
     )
     cleanup_sessions()
     return RedirectResponse(f"/#{fastapi_token}")
-
-
-@app.post("/logout")
-def logout():
-    fastapi_token = "42"
-    try:
-        if fastapi_token:
-            del sessions[fastapi_token]
-    except KeyError:
-        pass
-    return RedirectResponse("/")
 
 
 @dataclasses.dataclass
