@@ -7,6 +7,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 from fastapi import Depends, FastAPI, Query, Response
+from fastapi.exceptions import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -33,15 +34,34 @@ async def homepage():
     """.strip()
 
 
+@dataclasses.dataclass
+class Session:
+    created: float
+    fastapi_token: str
+    refresh_token: Optional[str]
+    access_token: Optional[Dict]
+    id_token: Optional[Dict]
+    error: Optional[str]
+    error_description: Optional[str]
+
+
 auth = HTTPBearer()
 
 
-def foobar(*args, **kw):
-    logging.info("foobar called %s", [args, kw])
+def valid_session(
+    authorization: HTTPAuthorizationCredentials = Depends(auth),
+) -> Session:
+    try:
+        session = sessions[authorization.credentials[:8]]
+        if not secrets.compare_digest(authorization.credentials, session.fastapi_token):
+            raise KeyError()
+    except KeyError:
+        raise HTTPException(403, "Not authenticated")
+    return Session(0, "omg")
 
 
 @app.post("/status")
-async def status(authorization: HTTPAuthorizationCredentials = Depends(auth)):
+async def status(session: Session = Depends(valid_session)):
     logging.info("got auth %s", authorization)
     return {"access_token": {"fix": "me"}, "id_token": {"fix": "me"}}
 
@@ -66,7 +86,7 @@ async def callback(
         error_description,
     )
     cleanup_sessions()
-    return RedirectResponse(f"/#{fastapi_token[:8]}")
+    return RedirectResponse(f"/#{fastapi_token}")
 
 
 @app.post("/logout")
@@ -83,17 +103,6 @@ def logout():
 @dataclasses.dataclass
 class State:
     created: float
-
-
-@dataclasses.dataclass
-class Session:
-    created: float
-    fastapi_token: str
-    refresh_token: Optional[str]
-    access_token: Optional[Dict]
-    id_token: Optional[Dict]
-    error: Optional[str]
-    error_description: Optional[str]
 
 
 sessions: Dict[str, Session] = {}
