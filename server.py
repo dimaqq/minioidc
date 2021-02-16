@@ -1,25 +1,41 @@
-import functools
+from __future__ import annotations
+import time
+import dataclasses
+import secrets
+import typing
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Cookie, Query
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
 
-@functools.lru_cache
-def session(id: str) -> Session:
-    ...
+@dataclasses.dataclass
+class Session:
+    created: float
+
+
+sessions: typing.Dict[str, Session] = {}
 
 
 @app.get("/items/", response_class=HTMLResponse)
-async def homepage(response: Response):
-    response.set_cookie("session", "fixme")
+async def homepage(
+        response: Response,
+        id: typing.Optional[str] = Cookie(None),
+        logout: typing.Optional[str] = Query(None),
+        ):
+    if id not in sessions:
+        id = secrets.token_hex(16)
+        sessions[id] = Session(time.time())
+        response.set_cookie("session", id)
+
     return """
     <html>
         <head>
             <title>Example client that implements OpenID Connect confidential client using code flow</title>
         </head>
         <body>
+            <div>FIXME</div>
         </body>
     </html>
     """.strip()
