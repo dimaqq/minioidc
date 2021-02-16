@@ -16,7 +16,8 @@ class Session:
     created: float
 
 
-sessions: typing.Dict[str, Session] = {}o
+sessions: typing.Dict[str, Session] = {}
+
 
 def cleanup_sessions():
     def clean(expiry):
