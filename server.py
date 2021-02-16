@@ -16,19 +16,36 @@ class Session:
     created: float
 
 
-sessions: typing.Dict[str, Session] = {}
+sessions: typing.Dict[str, Session] = {}o
+
+def cleanup_sessions():
+    def clean(expiry):
+        for k, s in sesssions.items():
+            if s.created < expiry:
+                del sessions[k]
+
+    duration = 3600
+    now = time.time()
+    clean(now - expiry)
+
+    while len(sessions) > 1000 and duration:
+        duration //= 2
+        clean(now - expiry)
 
 
 @app.get("/items/", response_class=HTMLResponse)
 async def homepage(
     response: Response,
-    id: typing.Optional[str] = Cookie(None),
+    session: typing.Optional[str] = Cookie(None),
     logout: typing.Optional[str] = Query(None),
 ):
-    if id not in sessions:
-        id = secrets.token_hex(16)
-        sessions[id] = Session(time.time())
-        response.set_cookie("session", id)
+    if session not in sessions:
+        session = secrets.token_hex(16)
+        s = sessions[session] = Session(time.time())
+        response.set_cookie("session", session)
+        cleanup_sessions()
+    else:
+        s = sessions[session]
 
     return """
     <html>
