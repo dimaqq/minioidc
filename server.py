@@ -6,6 +6,7 @@ import secrets
 import time
 from typing import Dict, Optional, Tuple
 
+import yarl
 from fastapi import Depends, FastAPI, Query, Response
 from fastapi.exceptions import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -32,13 +33,17 @@ async def homepage():
                 <div></div>
                 <label>FastAPI token</label>
                 <input id="fastapi_token"></input>
+                <div>First Tenant</div>
+                <div><a href="/login?config=1">Login with first</a></div>
+                <div>Second Tenant</div>
+                <div><a href="/login?config=2">Login with second</a></div>
                 <div></div>
                 <button id="logout">Logout</button>
             </div>
             <div class="status">
                 <label>Id token claims</label>
                 <label>Access token claims</label>
-                <label>The rest of status</label>
+                <label>Server debug: session, etc.</label>
                 <textarea id="id_token" placeholder="..."></textarea>
                 <textarea id="access_token" placeholder="..."></textarea>
                 <textarea id="status-rest" placeholder="..."></textarea>
@@ -78,8 +83,7 @@ def valid_session(
 @app.post("/status")
 async def status(session: Session = Depends(valid_session)):
     tmp = dataclasses.asdict(session)
-    del tmp["fastapi_token"]
-    del tmp["refresh_token"]
+    tmp["refresh_token"] = bool(tmp["refresh_token"])
     return tmp
 
 
@@ -91,9 +95,19 @@ def logout(session: Session = Depends(valid_session)):
         logging.exception("WTF")
 
 
-@app.get("/cb", response_class=HTMLResponse)
+@app.get("/login")
+async def login(config: Optional[str] = Query(None)):
+    try:
+        cfg = CONFIGS[config]
+    except KeyError:
+        raise HTTPException(422, "config parameter missing")
+    state = secrets.token_hex(20)
+    states[state[:8]] = state(time.time(), state, config)
+    cleanup(states)
+
+
+@app.get("/cb")
 async def callback(
-    response: Response,
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
@@ -110,38 +124,73 @@ async def callback(
         error,
         error_description,
     )
-    cleanup_sessions()
+    cleanup(sessions)
     return RedirectResponse(f"/#{fastapi_token}")
 
 
 @dataclasses.dataclass
 class State:
     created: float
+    state: str
+    config: str
 
 
 sessions: Dict[str, Session] = {}
 states: Dict[str, State] = {}
-COOKIE_DURATION = 3600
-COOKIE_LIMIT = 1000
+DEAFULT_DURATION = 3600
+DEFAULT_LIMIT = 1000
 
 
-def cleanup_sessions():
+def cleanup(what):
     def clean(expiry):
-        for k, s in sessions.items():
+        for k, s in what.items():
             if s.created < expiry:
-                del sessions[k]
+                del what[k]
 
-    duration = COOKIE_DURATION
+    duration = DEAFULT_DURATION
     now = time.time()
     clean(now - duration)
 
-    while len(sessions) > COOKIE_LIMIT and duration:
+    while len(what) > DEFAULT_LIMIT and duration:
         duration //= 2
         clean(now - duration)
 
 
 async def get_tokens(code) -> Tuple:
     return "rrr", {"a": 42}, {"id": 42}
+
+
+CONFIG1 = {
+    "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
+    "issuer": "http://localhost:7000",
+    "authorization_endpoint": "http://localhost:7000/authorize",
+    "response_types_supported": ["code"],
+    "token_endpoint": "http://localhost:7000/oauth/token",
+    "token_endpoint_auth_methods_supported": ["client_secret_post"],
+    "grant_types_supported": ["authorization_code", "refresh_token"],
+    "subject_types_supported": ["public"],
+    "id_token_signing_alg_values_supported": ["ES256"],
+    "jwks_uri": "http://localhost:7000/oauth/keys",
+    "scopes_supported": ["email", "offline_access", "openid", "profile"],
+    "userinfo_endpoint": "http://localhost:7000/oauth/userinfo",
+}
+
+CONFIG2 = {
+    "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
+    "issuer": "http://localhost:7000",
+    "authorization_endpoint": "http://localhost:7000/authorize",
+    "response_types_supported": ["code"],
+    "token_endpoint": "http://localhost:7000/oauth/token",
+    "token_endpoint_auth_methods_supported": ["client_secret_post"],
+    "grant_types_supported": ["authorization_code", "refresh_token"],
+    "subject_types_supported": ["public"],
+    "id_token_signing_alg_values_supported": ["ES256"],
+    "jwks_uri": "http://localhost:7000/oauth/keys",
+    "scopes_supported": ["email", "offline_access", "openid", "profile"],
+    "userinfo_endpoint": "http://localhost:7000/oauth/userinfo",
+}
+
+CONFIGS = {"1": CONFIG1, "2": CONFIG2}
 
 
 JS = """
@@ -200,7 +249,7 @@ window.onload = () => {
 
 CSS = """
 body {
-  width: 1024px;
+  width: 1200px;
   margin: 20px auto 20px auto;
   display: flex;
   flex-direction: column;
