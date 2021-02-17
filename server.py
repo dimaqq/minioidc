@@ -6,6 +6,7 @@ import secrets
 import time
 from typing import Dict, Optional, Tuple
 
+import httpx
 import yarl
 from fastapi import Depends, FastAPI, Query, Response
 from fastapi.exceptions import HTTPException
@@ -58,6 +59,7 @@ async def homepage():
 class Session:
     created: float
     fastapi_token: str
+    client_id: str
     refresh_token: Optional[str]
     access_token: Optional[Dict]
     id_token: Optional[Dict]
@@ -72,7 +74,7 @@ def valid_session(
     authorization: HTTPAuthorizationCredentials = Depends(auth),
 ) -> Session:
     try:
-        session = sessions[authorization.credentials[:8]]
+        session = SESSIONS[authorization.credentials[:8]]
         if not secrets.compare_digest(authorization.credentials, session.fastapi_token):
             raise KeyError()
         return session
@@ -90,7 +92,7 @@ async def status(session: Session = Depends(valid_session)):
 @app.post("/logout")
 def logout(session: Session = Depends(valid_session)):
     try:
-        del sessions[session.fastapi_token[:8]]
+        del SESSIONS[session.fastapi_token[:8]]
     except KeyError:
         logging.exception("WTF")
 
@@ -98,12 +100,35 @@ def logout(session: Session = Depends(valid_session)):
 @app.get("/login")
 async def login(config: Optional[str] = Query(None)):
     try:
-        cfg = CONFIGS[config]
+        cfg = PROVIDERS[config or "missing"]
     except KeyError:
-        raise HTTPException(422, "config parameter missing")
+        raise HTTPException(422, "config parameter missing or unknown")
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(cfg["server"])
+        r.raise_for_status()
+        configuration = r.json()
+        r = await client.get(configuration["jwks_uri"])
+        r.raise_for_status()
+        keys = r.json()
+
     state = secrets.token_hex(20)
-    states[state[:8]] = state(time.time(), state, config)
-    cleanup(states)
+    nonce = secrets.token_hex(16)
+    STATES[state[:8]] = State(time.time(), state, config)
+    cleanup(STATES)
+    return RedirectResponse(
+        str(
+            yarl.URL(configuration["authorization_endpoint"]).with_query(
+                client_id=cfg["client_id"],
+                response_type="code",
+                scope="openid profile email offline_access",
+                redirect_uri=REDIRECT_URIS[STAGE],
+                prompt="none",
+                state=state,
+                nonce=nonce,
+            )
+        )
+    )
 
 
 @app.get("/cb")
@@ -113,18 +138,50 @@ async def callback(
     error: Optional[str] = Query(None),
     error_description: Optional[str] = Query(None),
 ):
+    try:
+        s = STATES[state[:8]]
+        if not secrets.compare_digest(s.state, state):
+            raise KeyError()
+        cfg = PROVIDERS[s.config]
+    except (KeyError, TypeError):
+        raise HTTPException(401, "Ignoring callback because state didn't match")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get(cfg["server"])
+            r.raise_for_status()
+            configuration = r.json()
+            r = await client.get(configuration["jwks_uri"])
+            r.raise_for_status()
+            keys = r.json()
+            r = await client.post(
+                configuration["token_endpoint"],
+                data=dict(
+                    grant_type="authorization_code",
+                    client_id=cfg["client_id"],
+                    client_secret=cfg["client_secret"],
+                    code=code,
+                    redirect_uri=REDIRECT_URIS[STAGE],
+                ),
+            )
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(401, e.response.json())
+
+        refresh_token, access_token, id_token = await get_tokens(code)
+
     fastapi_token = secrets.token_hex(20)
-    refresh_token, access_token, id_token = await get_tokens(code)
-    sessions[fastapi_token[:8]] = Session(
+    SESSIONS[fastapi_token[:8]] = Session(
         time.time(),
         fastapi_token,
+        cfg["client_id"],
         refresh_token,
         access_token,
         id_token,
         error,
         error_description,
     )
-    cleanup(sessions)
+    cleanup(SESSIONS)
     return RedirectResponse(f"/#{fastapi_token}")
 
 
@@ -135,8 +192,8 @@ class State:
     config: str
 
 
-sessions: Dict[str, Session] = {}
-states: Dict[str, State] = {}
+SESSIONS: Dict[str, Session] = {}
+STATES: Dict[str, State] = {}
 DEAFULT_DURATION = 3600
 DEFAULT_LIMIT = 1000
 
@@ -160,8 +217,20 @@ async def get_tokens(code) -> Tuple:
     return "rrr", {"a": 42}, {"id": 42}
 
 
-CONFIG1 = {
+STAGE = "local"
+
+REDIRECT_URIS = {
+    "local": "http://localhost:3000/cb",
+    "stg": "https://somewhere.demodesu.com/cb",
+}
+
+PROV1 = {
     "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
+    "client_secret": "nmJGAsNw-FR-xMOVXE5clrXRU9AO_KY51FBZigHE5HE",
+    "server": "http://localhost:7000/.well-known/openid-configuration",
+}
+
+SERVER_FIXME = {
     "issuer": "http://localhost:7000",
     "authorization_endpoint": "http://localhost:7000/authorize",
     "response_types_supported": ["code"],
@@ -175,22 +244,13 @@ CONFIG1 = {
     "userinfo_endpoint": "http://localhost:7000/oauth/userinfo",
 }
 
-CONFIG2 = {
-    "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
-    "issuer": "http://localhost:7000",
-    "authorization_endpoint": "http://localhost:7000/authorize",
-    "response_types_supported": ["code"],
-    "token_endpoint": "http://localhost:7000/oauth/token",
-    "token_endpoint_auth_methods_supported": ["client_secret_post"],
-    "grant_types_supported": ["authorization_code", "refresh_token"],
-    "subject_types_supported": ["public"],
-    "id_token_signing_alg_values_supported": ["ES256"],
-    "jwks_uri": "http://localhost:7000/oauth/keys",
-    "scopes_supported": ["email", "offline_access", "openid", "profile"],
-    "userinfo_endpoint": "http://localhost:7000/oauth/userinfo",
+PROV2 = {
+    "client_id": "9a2b0d4a-9af2-4d23-8ab5-b77e46627b78.hen.ka",
+    "client_secret": "9JPXlw9qs5bk0eswWOLJhR_iGlagpol9ZJ2dnsEEKJg",
+    "server": "http://localhost:7000/.well-known/openid-configuration",
 }
 
-CONFIGS = {"1": CONFIG1, "2": CONFIG2}
+PROVIDERS = {"1": PROV1, "2": PROV2}
 
 
 JS = """
