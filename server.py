@@ -7,6 +7,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 import httpx
+import jwt
 import yarl
 from fastapi import Depends, FastAPI, Query, Response
 from fastapi.exceptions import HTTPException
@@ -105,12 +106,15 @@ async def login(config: Optional[str] = Query(None)):
         raise HTTPException(422, "config parameter missing or unknown")
 
     async with httpx.AsyncClient() as client:
-        r = await client.get(cfg["server"])
-        r.raise_for_status()
-        configuration = r.json()
-        r = await client.get(configuration["jwks_uri"])
-        r.raise_for_status()
-        keys = r.json()
+        try:
+            r = await client.get(cfg["server"])
+            r.raise_for_status()
+            configuration = r.json()
+            r = await client.get(configuration["jwks_uri"])
+            r.raise_for_status()
+            keys = r.json()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(400, e.response.text)
 
     state = secrets.token_hex(20)
     nonce = secrets.token_hex(16)
@@ -168,16 +172,14 @@ async def callback(
         except httpx.HTTPStatusError as e:
             raise HTTPException(401, e.response.json())
 
-        refresh_token, access_token, id_token = await get_tokens(code)
-
     fastapi_token = secrets.token_hex(20)
     SESSIONS[fastapi_token[:8]] = Session(
         time.time(),
         fastapi_token,
         cfg["client_id"],
-        refresh_token,
-        access_token,
-        id_token,
+        r.json().get("refresh_token"),
+        claims(r.json().get("access_token"), keys),
+        claims(r.json().get("id_token"), keys),
         error,
         error_description,
     )
@@ -213,7 +215,24 @@ def cleanup(what):
         clean(now - duration)
 
 
-async def get_tokens(code) -> Tuple:
+def claims(token: Optional[str], keys: dict) -> Optional[dict]:
+    if not token:
+        return token
+    claims = jwt.decode(
+        token,
+        key="foobar",
+        algorithms=["ES256"],  # FIXME what?
+        options=dict(
+            verify_signature=True,
+            require_exp=True,
+            verify_exp=True,
+            verify_iss=True,
+            verify_aud=True,
+            require_iat=False,
+            require_nbf=False,
+        ),
+        issuer="fixme",
+    )
     return "rrr", {"a": 42}, {"id": 42}
 
 
@@ -231,17 +250,17 @@ PROV1 = {
 }
 
 SERVER_FIXME = {
-    "issuer": "http://localhost:7000",
-    "authorization_endpoint": "http://localhost:7000/authorize",
+    "issuer": "http://server.com",
+    "authorization_endpoint": "http://server.com/authorize",
     "response_types_supported": ["code"],
-    "token_endpoint": "http://localhost:7000/oauth/token",
+    "token_endpoint": "http://server.com/oauth/token",
     "token_endpoint_auth_methods_supported": ["client_secret_post"],
     "grant_types_supported": ["authorization_code", "refresh_token"],
     "subject_types_supported": ["public"],
     "id_token_signing_alg_values_supported": ["ES256"],
-    "jwks_uri": "http://localhost:7000/oauth/keys",
+    "jwks_uri": "http://server.com/oauth/keys",
     "scopes_supported": ["email", "offline_access", "openid", "profile"],
-    "userinfo_endpoint": "http://localhost:7000/oauth/userinfo",
+    "userinfo_endpoint": "http://server.com/oauth/userinfo",
 }
 
 PROV2 = {
