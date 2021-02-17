@@ -28,8 +28,11 @@ async def homepage():
         <body>
             <h1>OpenID Connect test client</h1>
             <div class="system">
-                <label>System status</label>
-                <div id="system"></div>
+                <div>System status</div>
+                <div></div>
+                <label>FastAPI token</label>
+                <input id="fastapi_token"></input>
+                <div></div>
                 <button id="logout">Logout</button>
             </div>
             <div class="status">
@@ -39,8 +42,8 @@ async def homepage():
                 <textarea id="id_token" placeholder="..."></textarea>
                 <textarea id="access_token" placeholder="..."></textarea>
                 <textarea id="status-rest" placeholder="..."></textarea>
+                <div></div><div></div><button id="recheck">Re-check</button>
             </div>
-            <button id="status">Re-check</button>
         </body>
     </html>
     """.strip()
@@ -143,34 +146,53 @@ async def get_tokens(code) -> Tuple:
 
 JS = """
 "use strict";
+const state = {};
 const new_token = window.location.hash.split("#")[1];
 if (new_token) {
   window.location.hash = "";
   localStorage.setItem("fastapi_token", new_token);
 }
-const fastapi_token = localStorage.getItem("fastapi_token");
-console.log("FastAPI token is", fastapi_token);
+state.fastapi_token = localStorage.getItem("fastapi_token");
+console.log("FastAPI token is", state.fastapi_token);
 
 const logout = async () => {
-  const resp = await fetch("/logout", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
-  const data = await resp.json();
-  console.log("logout", data);
+  if (state.fastapi_token) {
+    const resp = await fetch("/logout", {method: "POST", headers: {Authorization: `Bearer ${ state.fastapi_token }`}});
+    const data = await resp.json();
+    console.log("logout", data);
+  }
+  localStorage.removeItem("fastapi_token");
+  state.fastapi_token = null;
   await status();
 };
 
 const status = async () => {
-  const resp = await fetch("/status", {method: "POST", headers: {Authorization: `Bearer ${ fastapi_token }`}});
-  const data = await resp.json();
-  console.log("status", data);
-  const {id_token, access_token, ...rest} = data;
-  document.querySelector("#id_token").value = JSON.stringify(id_token, null, 2);
-  document.querySelector("#access_token").value = JSON.stringify(access_token, null, 2);
-  document.querySelector("#status-rest").value = JSON.stringify(rest, null, 2);
+  let data;
+  if (state.fastapi_token) {
+    const resp = await fetch("/status", {method: "POST", headers: {Authorization: `Bearer ${ state.fastapi_token }`}});
+    data = await resp.json();
+    console.log("status", data);
+  }
+  else {
+    data = {system_error: "no FastAPI token"};
+  }
+  const {id_token, access_token, ...status_rest} = data;
+  state.id_token = id_token;
+  state.access_token = access_token;
+  state.status_rest = status_rest;
+  render();
+};
+
+const render = () => {
+  document.querySelector("#id_token").value = JSON.stringify(state.id_token, null, 2);
+  document.querySelector("#access_token").value = JSON.stringify(state.access_token, null, 2);
+  document.querySelector("#status-rest").value = JSON.stringify(state.status_rest, null, 2);
+  document.querySelector("#fastapi_token").value = state.fastapi_token;
 };
 
 window.onload = () => {
   document.querySelector("#logout").onclick = logout;
-  document.querySelector("#status").onclick = status;
+  document.querySelector("#recheck").onclick = status;
   status();
   setInterval(status, 1000);
 };
@@ -185,12 +207,17 @@ body {
 }
 
 .system {
-  display: flex;
+  display: grid;
   margin: 20px 0 60px 0;
+  border: 1px solid rgba(0,0,0,.3);
+  border-radius: 5px;
+  padding: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 10px;
 }
 
-#system {
-  flex: auto;
+#logout {
+  margin-left: auto;
 }
 
 textarea {
@@ -199,6 +226,9 @@ textarea {
 
 .status {
   height: 500px;
+  border: 1px solid rgba(0,0,0,.3);
+  border-radius: 5px;
+  padding: 10px;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: max-content 1fr max-content;
@@ -209,9 +239,9 @@ textarea {
     ". . .";
 }
 
-#status {
+#recheck {
   flex: none;
-  margin: 10px 10px 10px auto;
+  margin-left: auto;
 }
 """
 
