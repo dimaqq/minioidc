@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import dataclasses
+import json
 import logging
 import secrets
 import time
@@ -178,8 +180,8 @@ async def callback(
         fastapi_token,
         cfg["client_id"],
         r.json().get("refresh_token"),
-        claims(r.json().get("access_token"), keys),
-        claims(r.json().get("id_token"), keys),
+        claims(token=r.json().get("access_token"), keys=keys),
+        claims(token=r.json().get("id_token"), keys=keys),
         error,
         error_description,
     )
@@ -217,10 +219,14 @@ def cleanup(what):
 
 def claims(token: Optional[str], keys: dict) -> Optional[dict]:
     if not token:
-        return token
+        return
+    head = header(token)
+    if not head:
+        return
+    logging.info("head %s", head)
     claims = jwt.decode(
         token,
-        key="foobar",
+        key=keys["keys"],
         algorithms=["ES256"],  # FIXME what?
         options=dict(
             verify_signature=True,
@@ -233,7 +239,16 @@ def claims(token: Optional[str], keys: dict) -> Optional[dict]:
         ),
         issuer="fixme",
     )
-    return "rrr", {"a": 42}, {"id": 42}
+    # FIXME additional claims validation
+    return claims
+
+
+def header(token: str) -> dict:
+    try:
+        rv, *_ = token.split(".")
+        return json.loads(base64.b64decode(f"{rv}==="))
+    except Exception:
+        logging.exception("could not parse token")
 
 
 STAGE = "local"
