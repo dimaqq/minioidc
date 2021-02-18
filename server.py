@@ -4,6 +4,7 @@ import base64
 import dataclasses
 import json
 import logging
+import os
 import secrets
 import time
 from typing import Dict, Optional, Tuple
@@ -124,7 +125,7 @@ async def login(config: Optional[str] = Query(None)):
                 client_id=cfg["client_id"],
                 response_type="code",
                 scope="openid profile email offline_access",
-                redirect_uri=REDIRECT_URIS[STAGE],
+                redirect_uri=f"{ORIGIN}/cb",
                 prompt="none",
                 state=state,
                 nonce=nonce,
@@ -158,7 +159,7 @@ async def callback(
                     client_id=cfg["client_id"],
                     client_secret=cfg["client_secret"],
                     code=code,
-                    redirect_uri=REDIRECT_URIS[STAGE],
+                    redirect_uri=f"{ORIGIN}/cb",
                 ),
             )
             r.raise_for_status()
@@ -181,7 +182,30 @@ async def callback(
 
 
 async def may_refresh(session: Session):
-    ...
+    if not session.refresh_token:
+        return
+    tokens = [getattr(session, name) for name in ("access_token", "id_token")]
+    if not any(t and t["exp"] < time.time() for t in tokens):
+        return
+    async with httpx.AsyncClient() as client:
+        try:
+            configuration, keys = await metadata(client, session.config)
+            r = await client.post(
+                configuration["token_endpoint"],
+                data=dict(
+                    grant_type="refresh_token",
+                    client_id=PROVIDERS[session.config]["client_id"],
+                    client_secret=PROVIDERS[session.config]["client_secret"],
+                    refresh_token=session.refresh_token,
+                    redirect_uri=f"{ORIGIN}/cb",
+                ),
+            )
+            session.access_token = claims(
+                r.json()["access_token"], keys, session.config
+            )
+            session.id_token = claims(r.json()["id_token"], keys, session.config)
+        except httpx.HTTPStatusError as e:
+            logging.exception("failed to refresh token")
 
 
 @dataclasses.dataclass
@@ -258,20 +282,15 @@ async def metadata(client, config: str) -> Tuple[dict, dict]:
     return configuration, r.json()
 
 
-STAGE = "local"
+ORIGIN = os.environ.get("MINIOIDC_ORIGIN", "")
 
-REDIRECT_URIS = {
-    "local": "http://localhost:3000/cb",
-    "stg": "https://somewhere.demodesu.com/cb",
-}
+PROVIDERS = {"1": {}, "2": {}}
+for name in ("issuer", "client_id", "client_secret"):
+    PROVIDERS["1"][name] = os.environ.get(f"MINIOIDC_PROVIDER1_{name}", "")
+    PROVIDERS["2"][name] = os.environ.get(f"MINIOIDC_PROVIDER2_{name}", "")
 
-PROV1 = {
-    "issuer": "http://localhost:7000",
-    "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
-    "client_secret": "nmJGAsNw-FR-xMOVXE5clrXRU9AO_KY51FBZigHE5HE",
-}
 
-SERVER_FIXME = {
+SAMPLE_OIDC_CONFIGURATION = {
     "issuer": "http://server.com",
     "authorization_endpoint": "http://server.com/authorize",
     "response_types_supported": ["code"],
@@ -284,14 +303,6 @@ SERVER_FIXME = {
     "scopes_supported": ["email", "offline_access", "openid", "profile"],
     "userinfo_endpoint": "http://server.com/oauth/userinfo",
 }
-
-PROV2 = {
-    "issuer": "http://localhost:7000",
-    "client_id": "9a2b0d4a-9af2-4d23-8ab5-b77e46627b78.hen.ka",
-    "client_secret": "9JPXlw9qs5bk0eswWOLJhR_iGlagpol9ZJ2dnsEEKJg",
-}
-
-PROVIDERS = {"1": PROV1, "2": PROV2}
 
 
 JS = """
