@@ -217,16 +217,17 @@ def cleanup(what):
         clean(now - duration)
 
 
-def claims(token: Optional[str], keys: dict) -> Optional[dict]:
+def claims(token: Optional[str], keys: dict, config: str) -> Optional[dict]:
+    kids = {k["kid"]: k for k in keys["keys"]}
     if not token:
         return
     head = header(token)
-    if not head:
+    if not head or head.get("alg") != "ES256" or head.get("kid") not in kids:
         return
-    logging.info("head %s", head)
     claims = jwt.decode(
         token,
-        key=keys["keys"],
+        # https://github.com/jpadilla/pyjwt/issues/603
+        key=jwt.api_jwk.PyJWK({"alg": "ES256", **kids[head["kid"]]}).key,
         algorithms=["ES256"],  # FIXME what?
         options=dict(
             verify_signature=True,
@@ -237,7 +238,8 @@ def claims(token: Optional[str], keys: dict) -> Optional[dict]:
             require_iat=False,
             require_nbf=False,
         ),
-        issuer="fixme",
+        issuer=PROVIDERS[config]["issuer"],
+        audience=PROVIDERS[config]["client_id"],
     )
     # FIXME additional claims validation
     return claims
@@ -245,8 +247,7 @@ def claims(token: Optional[str], keys: dict) -> Optional[dict]:
 
 def header(token: str) -> dict:
     try:
-        rv, *_ = token.split(".")
-        return json.loads(base64.b64decode(f"{rv}==="))
+        return json.loads(base64.b64decode(f"{token.split('.')[0]}==="))
     except Exception:
         logging.exception("could not parse token")
 
