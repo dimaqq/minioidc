@@ -62,7 +62,7 @@ async def homepage():
 class Session:
     created: float
     fastapi_token: str
-    client_id: str
+    config: str
     refresh_token: Optional[str]
     access_token: Optional[Dict]
     id_token: Optional[Dict]
@@ -87,6 +87,7 @@ def valid_session(
 
 @app.post("/status")
 async def status(session: Session = Depends(valid_session)):
+    await may_refresh(session)
     tmp = dataclasses.asdict(session)
     tmp["refresh_token"] = bool(tmp["refresh_token"])
     return tmp
@@ -168,7 +169,7 @@ async def callback(
     SESSIONS[fastapi_token[:8]] = Session(
         time.time(),
         fastapi_token,
-        cfg["client_id"],
+        s.config,
         r.json().get("refresh_token"),
         claims(r.json().get("access_token"), keys, s.config),
         claims(r.json().get("id_token"), keys, s.config),
@@ -177,6 +178,10 @@ async def callback(
     )
     cleanup(SESSIONS)
     return RedirectResponse(f"/#{fastapi_token}")
+
+
+async def may_refresh(session: Session):
+    ...
 
 
 @dataclasses.dataclass
@@ -345,7 +350,7 @@ window.onload = () => {
 
 CSS = """
 body {
-  width: 1600px;
+  width: 1800px;
   margin: 20px auto 20px auto;
   display: flex;
   flex-direction: column;
