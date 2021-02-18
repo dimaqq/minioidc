@@ -364,8 +364,8 @@ multidict = ">=4.0"
 
 [metadata]
 lock-version = "1.1"
-python-versions = "^3.8"
-content-hash = "c0deb0aa9616a1b89ce112ecfa66479d195c372d8e932ba7661e4c09bbf96982"
+python-versions = "^3.9"
+content-hash = "b3736665d976e23582871a024d8194e47a9ebea0560e6afddd516e948808a5de"
 
 [metadata.files]
 atomicwrites = [

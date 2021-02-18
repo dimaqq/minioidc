@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "oida-cli"
+name = "minioidc"
 version = "1.0.0"
 description = "Example client that implements OpenID Connect confidential client using code flow"
 authors = ["Dima Tisnek <dimaqq@gmail.com>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.9"
 fastapi = "^0.63.0"
 PyJWT = {extras = ["crypto"], version = "^2.0.1"}
 uvicorn = "^0.13.3"
