@@ -180,8 +180,8 @@ async def callback(
         fastapi_token,
         cfg["client_id"],
         r.json().get("refresh_token"),
-        claims(token=r.json().get("access_token"), keys=keys),
-        claims(token=r.json().get("id_token"), keys=keys),
+        claims(r.json().get("access_token"), keys, s.config),
+        claims(r.json().get("id_token"), keys, s.config),
         error,
         error_description,
     )
@@ -263,6 +263,7 @@ PROV1 = {
     "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
     "client_secret": "nmJGAsNw-FR-xMOVXE5clrXRU9AO_KY51FBZigHE5HE",
     "server": "http://localhost:7000/.well-known/openid-configuration",
+    "issuer": "http://localhost:7000",
 }
 
 SERVER_FIXME = {
@@ -283,6 +284,7 @@ PROV2 = {
     "client_id": "9a2b0d4a-9af2-4d23-8ab5-b77e46627b78.hen.ka",
     "client_secret": "9JPXlw9qs5bk0eswWOLJhR_iGlagpol9ZJ2dnsEEKJg",
     "server": "http://localhost:7000/.well-known/openid-configuration",
+    "issuer": "http://localhost:7000",
 }
 
 PROVIDERS = {"1": PROV1, "2": PROV2}
