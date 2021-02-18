@@ -109,12 +109,7 @@ async def login(config: Optional[str] = Query(None)):
 
     async with httpx.AsyncClient() as client:
         try:
-            r = await client.get(cfg["server"])
-            r.raise_for_status()
-            configuration = r.json()
-            r = await client.get(configuration["jwks_uri"])
-            r.raise_for_status()
-            keys = r.json()
+            configuration, keys = await metadata(client, config)
         except httpx.HTTPStatusError as e:
             raise HTTPException(400, e.response.text)
 
@@ -154,12 +149,7 @@ async def callback(
 
     async with httpx.AsyncClient() as client:
         try:
-            r = await client.get(cfg["server"])
-            r.raise_for_status()
-            configuration = r.json()
-            r = await client.get(configuration["jwks_uri"])
-            r.raise_for_status()
-            keys = r.json()
+            configuration, keys = await metadata(client, s.config)
             r = await client.post(
                 configuration["token_endpoint"],
                 data=dict(
@@ -252,6 +242,17 @@ def header(token: str) -> dict:
         logging.exception("could not parse token")
 
 
+async def metadata(client, config: str) -> Tuple[dict, dict]:
+    r = await client.get(
+        str(yarl.URL(PROVIDERS[config]["issuer"]) / ".well-known/openid-configuration")
+    )
+    r.raise_for_status()
+    configuration = r.json()
+    r = await client.get(configuration["jwks_uri"])
+    r.raise_for_status()
+    return configuration, r.json()
+
+
 STAGE = "local"
 
 REDIRECT_URIS = {
@@ -260,10 +261,9 @@ REDIRECT_URIS = {
 }
 
 PROV1 = {
+    "issuer": "http://localhost:7000",
     "client_id": "c54da607-d855-4f9b-a6e9-4d12cfa62921.hen.ka",
     "client_secret": "nmJGAsNw-FR-xMOVXE5clrXRU9AO_KY51FBZigHE5HE",
-    "server": "http://localhost:7000/.well-known/openid-configuration",
-    "issuer": "http://localhost:7000",
 }
 
 SERVER_FIXME = {
@@ -281,10 +281,9 @@ SERVER_FIXME = {
 }
 
 PROV2 = {
+    "issuer": "http://localhost:7000",
     "client_id": "9a2b0d4a-9af2-4d23-8ab5-b77e46627b78.hen.ka",
     "client_secret": "9JPXlw9qs5bk0eswWOLJhR_iGlagpol9ZJ2dnsEEKJg",
-    "server": "http://localhost:7000/.well-known/openid-configuration",
-    "issuer": "http://localhost:7000",
 }
 
 PROVIDERS = {"1": PROV1, "2": PROV2}
@@ -346,7 +345,7 @@ window.onload = () => {
 
 CSS = """
 body {
-  width: 1200px;
+  width: 1600px;
   margin: 20px auto 20px auto;
   display: flex;
   flex-direction: column;
@@ -371,7 +370,7 @@ textarea {
 }
 
 .status {
-  height: 500px;
+  height: 400px;
   border: 1px solid rgba(0,0,0,.3);
   border-radius: 5px;
   padding: 10px;
