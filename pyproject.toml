@@ -4,6 +4,21 @@ version = "1.0.0"
 description = "Example client that implements OpenID Connect confidential client using code flow"
 authors = ["Dima Tisnek <dimaqq@gmail.com>"]
 license = "MIT"
+readme = "readme.md"
+homepage = "https://github.com/HENNGE/minioidc"
+repository = "https://github.com/HENNGE/minioidc"
+documentation = "https://minioidc.readthedocs.io/en/latest/"
+keywords = ["asyncio"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python :: 3 :: Only",
+  "Framework :: AsyncIO",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: Microsoft :: Windows",
+]
 
 [tool.poetry.dependencies]
 python = "^3.9"
