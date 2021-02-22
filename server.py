@@ -223,7 +223,7 @@ DEFAULT_LIMIT = 1000
 
 def cleanup(what):
     def clean(expiry):
-        for k, s in what.items():
+        for k, s in list(what.items()):
             if s.created < expiry:
                 del what[k]
 
