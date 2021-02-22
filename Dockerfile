@@ -17,7 +17,9 @@ RUN apk update \
     && ln -s /etc/poetry/bin/poetry /usr/local/bin/poetry \
     && poetry install --no-dev \
     && poetry run python -m compileall \
-    && rm -rf /root/.cache /root/.cargo \
+    && rm -rf /root/.cache/pip \
+    && rm -rf /root/.cache/pypoetry/artifacts /root/.cache/pypoetry/cache \
+    && rm -rf /root/.cargo \
     && rm -rf /etc/poetry/lib/poetry/_vendor/py2.7 \
     && rm -rf /etc/poetry/lib/poetry/_vendor/py3.5 \
     && rm -rf /etc/poetry/lib/poetry/_vendor/py3.6 \
