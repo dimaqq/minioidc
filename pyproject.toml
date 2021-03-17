@@ -27,10 +27,12 @@ PyJWT = {extras = ["crypto"], version = "^2.0.1"}
 uvicorn = "^0.13.3"
 yarl = "^1.6.3"
 httpx = "^0.16.1"
+typeguard = "^2.11.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.2"
 mypy = "^0.800"
+ipython = "^7.21.0"
 
 [tool.poetry.scripts]
 start = "poetry run uvicorn server:app --reload"

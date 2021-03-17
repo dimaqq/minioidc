@@ -110,29 +110,17 @@ async def login(config: Optional[str] = Query(None)):
     except KeyError:
         raise HTTPException(422, "config parameter missing or unknown")
 
-    async with httpx.AsyncClient() as client:
-        try:
-            configuration, _ = await minioidc.metadata(client, PROVIDERS[config])
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(400, e.response.text)
-
     state = secrets.token_hex(20)
     nonce = secrets.token_hex(16)  # FIXME validate nonce
     STATES[state[:8]] = State(time.time(), state, config)
     cleanup(STATES)
-    return RedirectResponse(
-        str(
-            yarl.URL(configuration["authorization_endpoint"]).with_query(
-                client_id=cfg.client_id,
-                response_type="code",
-                scope="openid profile email offline_access",
-                redirect_uri=f"{ORIGIN}/cb",
-                prompt="none",
-                state=state,
-                nonce=nonce,
+    async with httpx.AsyncClient() as client:
+        try:
+            return RedirectResponse(
+                await minioidc.login_url(client, cfg, state=state, nonce=nonce)
             )
-        )
-    )
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(400, e.response.text)
 
 
 @app.get("/cb")

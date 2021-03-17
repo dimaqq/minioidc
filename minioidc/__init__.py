@@ -1,9 +1,11 @@
+import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, TypedDict
 
+import httpx
 import jwt
+import typeguard
 import yarl
-from httpx import AsyncClient
 
 
 @dataclass
@@ -13,9 +15,52 @@ class Provider:
     client_secret: str
     redirect_uri: str
 
+    def __str__(self):
+        return f"Provider({self.issuer})"
+
+
+class Configuration(TypedDict, total=False):
+    """Subset of OpenID configuration JSON that we need"""
+
+    authorization_endpoint: str
+    token_endpoint: str
+    jwks_uri: str
+
+
+class Key(TypedDict, total=False):
+    kid: str
+    kty: str
+    alg: str
+    crv: str
+    x: str
+    y: str
+    # TODO add RSA bits
+
+
+class Keys(TypedDict):
+    keys: List[Key]
+
+
+async def login_url(
+    client: httpx.AsyncClient, provider: Provider, *, state: str, nonce: str = None
+) -> str:
+    # TODO make nonce optional
+    configuration, _ = await metadata(client, provider)
+    return str(
+        yarl.URL(configuration["authorization_endpoint"]).with_query(
+            client_id=provider.client_id,
+            response_type="code",
+            scope="openid profile email offline_access",
+            redirect_uri=provider.redirect_uri,
+            prompt="none",
+            state=state,
+            nonce=nonce,
+        )
+    )
+
 
 async def get_tokens(
-    client: AsyncClient,
+    client: httpx.AsyncClient,
     provider: Provider,
     *,
     code: str = None,
@@ -49,15 +94,20 @@ async def get_tokens(
 
 
 # FIXME cache it
-async def metadata(client: AsyncClient, provider: Provider) -> Tuple[dict, dict]:
+async def metadata(
+    client: httpx.AsyncClient, provider: Provider
+) -> Tuple[Configuration, Keys]:
     r = await client.get(
         str(yarl.URL(provider.issuer) / ".well-known/openid-configuration")
     )
     r.raise_for_status()
-    configuration = r.json()
+    configuration = _clean(
+        f"openid configuration for {provider}", r.json(), type=Configuration
+    )
     r = await client.get(configuration["jwks_uri"])
     r.raise_for_status()
-    return configuration, r.json()
+    keys = _clean(f"openid keys for {provider}", r.json(), type=Keys)
+    return configuration, keys
 
 
 def _claims(token: Optional[str], keys: dict, provider: Provider) -> Optional[dict]:
@@ -93,3 +143,13 @@ def _header(token: str) -> Optional[dict]:
         return json.loads(base64.b64decode(f"{token.split('.')[0]}==="))
     except Exception:
         pass
+
+
+def _clean(name, value, type):
+    try:
+        value = {k: v for (k, v) in value.items() if k in type.__annotations__}
+        typeguard.check_type(name, value, type)
+        return value
+    except (AttributeError, TypeError) as e:
+        # TODO custom exception
+        raise Exception(f"can't load {name}: {e}") from None
