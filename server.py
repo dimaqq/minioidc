@@ -10,12 +10,12 @@ import time
 from typing import Dict, Optional, Tuple
 
 import httpx
-import jwt
-import yarl
 from fastapi import Depends, FastAPI, Query, Response
 from fastapi.exceptions import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+import minioidc
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
@@ -109,29 +109,17 @@ async def login(config: Optional[str] = Query(None)):
     except KeyError:
         raise HTTPException(422, "config parameter missing or unknown")
 
-    async with httpx.AsyncClient() as client:
-        try:
-            configuration, keys = await metadata(client, config)
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(400, e.response.text)
-
     state = secrets.token_hex(20)
-    nonce = secrets.token_hex(16)
+    nonce = secrets.token_hex(16)  # FIXME validate nonce
     STATES[state[:8]] = State(time.time(), state, config)
     cleanup(STATES)
-    return RedirectResponse(
-        str(
-            yarl.URL(configuration["authorization_endpoint"]).with_query(
-                client_id=cfg["client_id"],
-                response_type="code",
-                scope="openid profile email offline_access",
-                redirect_uri=f"{ORIGIN}/cb",
-                prompt="none",
-                state=state,
-                nonce=nonce,
+    async with httpx.AsyncClient() as client:
+        try:
+            return RedirectResponse(
+                await minioidc.login_url(client, cfg, state=state, nonce=nonce)
             )
-        )
-    )
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(400, e.response.text)
 
 
 @app.get("/cb")
@@ -145,24 +133,17 @@ async def callback(
         s = STATES[state[:8]]
         if not secrets.compare_digest(s.state, state):
             raise KeyError()
-        cfg = PROVIDERS[s.config]
+        provider = PROVIDERS[s.config]
     except (KeyError, TypeError):
         raise HTTPException(401, "Ignoring callback because state didn't match")
 
     async with httpx.AsyncClient() as client:
         try:
-            configuration, keys = await metadata(client, s.config)
-            r = await client.post(
-                configuration["token_endpoint"],
-                data=dict(
-                    grant_type="authorization_code",
-                    client_id=cfg["client_id"],
-                    client_secret=cfg["client_secret"],
-                    code=code,
-                    redirect_uri=f"{ORIGIN}/cb",
-                ),
-            )
-            r.raise_for_status()
+            (
+                refresh_token,
+                access_token_claims,
+                id_token_claims,
+            ) = await minioidc.get_tokens(client, provider, code=code)
         except httpx.HTTPStatusError as e:
             raise HTTPException(401, e.response.json())
 
@@ -171,9 +152,9 @@ async def callback(
         time.time(),
         fastapi_token,
         s.config,
-        r.json().get("refresh_token"),
-        claims(r.json().get("access_token"), keys, s.config),
-        claims(r.json().get("id_token"), keys, s.config),
+        refresh_token,
+        access_token_claims,
+        id_token_claims,
         error,
         error_description,
     )
@@ -187,23 +168,14 @@ async def may_refresh(session: Session):
     tokens = [getattr(session, name) for name in ("access_token", "id_token")]
     if not any(t and t["exp"] < time.time() for t in tokens):
         return
+    provider = PROVIDERS[session.config]
     async with httpx.AsyncClient() as client:
         try:
-            configuration, keys = await metadata(client, session.config)
-            r = await client.post(
-                configuration["token_endpoint"],
-                data=dict(
-                    grant_type="refresh_token",
-                    client_id=PROVIDERS[session.config]["client_id"],
-                    client_secret=PROVIDERS[session.config]["client_secret"],
-                    refresh_token=session.refresh_token,
-                    redirect_uri=f"{ORIGIN}/cb",
-                ),
+            _, access_token_claims, id_token_claims = await minioidc.get_tokens(
+                client, provider, refresh_token=refresh_token
             )
-            session.access_token = claims(
-                r.json()["access_token"], keys, session.config
-            )
-            session.id_token = claims(r.json()["id_token"], keys, session.config)
+            session.access_token = access_token_claims
+            session.id_token = id_token_claims
         except httpx.HTTPStatusError as e:
             logging.exception("failed to refresh token")
 
@@ -236,74 +208,15 @@ def cleanup(what):
         clean(now - duration)
 
 
-def claims(token: Optional[str], keys: dict, config: str) -> Optional[dict]:
-    kids = {k["kid"]: k for k in keys["keys"]}
-    if not token:
-        return
-    head = header(token)
-    if not head or head.get("alg") != "ES256" or head.get("kid") not in kids:
-        return
-    claims = jwt.decode(
-        token,
-        # https://github.com/jpadilla/pyjwt/issues/603
-        key=jwt.api_jwk.PyJWK({"alg": "ES256", **kids[head["kid"]]}).key,
-        algorithms=["ES256"],  # FIXME what?
-        options=dict(
-            verify_signature=True,
-            require_exp=True,
-            verify_exp=True,
-            verify_iss=True,
-            verify_aud=True,
-            require_iat=False,
-            require_nbf=False,
-        ),
-        issuer=PROVIDERS[config]["issuer"],
-        audience=PROVIDERS[config]["client_id"],
-    )
-    # FIXME additional claims validation
-    return claims
-
-
-def header(token: str) -> dict:
-    try:
-        return json.loads(base64.b64decode(f"{token.split('.')[0]}==="))
-    except Exception:
-        logging.exception("could not parse token")
-
-
-async def metadata(client, config: str) -> Tuple[dict, dict]:
-    r = await client.get(
-        str(yarl.URL(PROVIDERS[config]["issuer"]) / ".well-known/openid-configuration")
-    )
-    r.raise_for_status()
-    configuration = r.json()
-    r = await client.get(configuration["jwks_uri"])
-    r.raise_for_status()
-    return configuration, r.json()
-
-
 ORIGIN = os.environ.get("MINIOIDC_ORIGIN", "")
 
-PROVIDERS = {"1": {}, "2": {}}
-for name in ("issuer", "client_id", "client_secret"):
-    PROVIDERS["1"][name] = os.environ.get(f"MINIOIDC_PROVIDER1_{name}", "")
-    PROVIDERS["2"][name] = os.environ.get(f"MINIOIDC_PROVIDER2_{name}", "")
-
-
-SAMPLE_OIDC_CONFIGURATION = {
-    "issuer": "http://server.com",
-    "authorization_endpoint": "http://server.com/authorize",
-    "response_types_supported": ["code"],
-    "token_endpoint": "http://server.com/oauth/token",
-    "token_endpoint_auth_methods_supported": ["client_secret_post"],
-    "grant_types_supported": ["authorization_code", "refresh_token"],
-    "subject_types_supported": ["public"],
-    "id_token_signing_alg_values_supported": ["ES256"],
-    "jwks_uri": "http://server.com/oauth/keys",
-    "scopes_supported": ["email", "offline_access", "openid", "profile"],
-    "userinfo_endpoint": "http://server.com/oauth/userinfo",
+PROVIDERS: Dict[str, minioidc.Provider] = {
+    "1": minioidc.Provider(None, None, None, f"{ORIGIN}/cb"),
+    "2": minioidc.Provider(None, None, None, f"{ORIGIN}/cb"),
 }
-
+for name in ("issuer", "client_id", "client_secret"):
+    setattr(PROVIDERS["1"], name, os.environ.get(f"MINIOIDC_PROVIDER1_{name}", ""))
+    setattr(PROVIDERS["2"], name, os.environ.get(f"MINIOIDC_PROVIDER2_{name}", ""))
 
 JS = """
 "use strict";

@@ -16,6 +16,6 @@ docker-compose.yml
 Gemfile
 Gemfile.lock
 _website*.json
-.*.swp
-__pycache__
+**/.*.swp
+**/__pycache__
 .envrc

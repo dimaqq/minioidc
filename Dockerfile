@@ -28,5 +28,6 @@ RUN apk update \
     && apk del req-deps
 
 EXPOSE 8000
-COPY server.py /app/
+COPY server.py ./
+COPY minioidc/ ./minioidc/
 ENTRYPOINT ["poetry", "run", "uvicorn", "server:app", "--host", ""]
