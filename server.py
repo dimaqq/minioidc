@@ -10,7 +10,6 @@ import time
 from typing import Dict, Optional, Tuple
 
 import httpx
-import yarl
 from fastapi import Depends, FastAPI, Query, Response
 from fastapi.exceptions import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse

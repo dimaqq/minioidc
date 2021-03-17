@@ -29,4 +29,5 @@ RUN apk update \
 
 EXPOSE 8000
 COPY server.py /app/
+COPY minioidc/ /app/miniodc/
 ENTRYPOINT ["poetry", "run", "uvicorn", "server:app", "--host", ""]
