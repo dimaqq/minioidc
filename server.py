@@ -208,15 +208,33 @@ def cleanup(what):
         clean(now - duration)
 
 
-ORIGIN = os.environ.get("MINIOIDC_ORIGIN", "")
+ORIGIN = ""
+PROVIDERS: Dict[str, minioidc.Provider] = {}
 
-PROVIDERS: Dict[str, minioidc.Provider] = {
-    "1": minioidc.Provider(None, None, None, f"{ORIGIN}/cb"),
-    "2": minioidc.Provider(None, None, None, f"{ORIGIN}/cb"),
-}
-for name in ("issuer", "client_id", "client_secret"):
-    setattr(PROVIDERS["1"], name, os.environ.get(f"MINIOIDC_PROVIDER1_{name}", ""))
-    setattr(PROVIDERS["2"], name, os.environ.get(f"MINIOIDC_PROVIDER2_{name}", ""))
+
+def configure():
+    origin = os.environ.get("MINIOIDC_ORIGIN", "")
+
+    providers: Dict[str, minioidc.Provider] = {
+        "1": minioidc.Provider(None, None, None, f"{origin}/cb"),
+        "2": minioidc.Provider(None, None, None, f"{origin}/cb"),
+    }
+    for name in ("issuer", "client_id", "client_secret"):
+        setattr(providers["1"], name, os.environ.get(f"MINIOIDC_PROVIDER1_{name}", ""))
+        setattr(providers["2"], name, os.environ.get(f"MINIOIDC_PROVIDER2_{name}", ""))
+
+    return origin, providers
+
+
+ORIGIN, PROVIDERS = configure()
+
+
+def start():
+    """Start in development mode"""
+    import uvicorn
+
+    uvicorn.run("server:app", port=3000, reload=True)
+
 
 JS = """
 "use strict";
