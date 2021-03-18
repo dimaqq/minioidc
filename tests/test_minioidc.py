@@ -17,23 +17,29 @@ async def client():
 
 @pytest.fixture
 def config():
-    with unittest.mock.patch(
-        "os.environ",
-        {
-            "MINIOIDC_ORIGIN": "http://localhost:3000",
-            "MINIOIDC_PROVIDER1_issuer": "https://server.test",
-            "MINIOIDC_PROVIDER1_client_id": "cli1",
-            "MINIOIDC_PROVIDER1_client_secret": "shh1",
-            "MINIOIDC_PROVIDER2_issuer": "https://multitenant.test/tenant/abcd",
-            "MINIOIDC_PROVIDER2_client_id": "cli2",
-            "MINIOIDC_PROVIDER2_client_secret": "shh2",
-        },
-    ):
+    fakeenv = {
+        "MINIOIDC_ORIGIN": "http://localhost:3000",
+        "MINIOIDC_PROVIDER1_issuer": "https://server.test",
+        "MINIOIDC_PROVIDER1_client_id": "cli1",
+        "MINIOIDC_PROVIDER1_client_secret": "shh1",
+        "MINIOIDC_PROVIDER2_issuer": "https://multitenant.test/tenant/abcd",
+        "MINIOIDC_PROVIDER2_client_id": "cli2",
+        "MINIOIDC_PROVIDER2_client_secret": "shh2",
+    }
+    with unittest.mock.patch("os.environ", fakeenv):
         origin, providers = server.configure()
         with unittest.mock.patch("server.ORIGIN", origin), unittest.mock.patch(
             "server.PROVIDERS", providers
         ):
-            yield
+            yield fakeenv
+
+
+@pytest.fixture
+def state():
+    s = server.State(123, "foobarbaz", "1")
+    server.STATES["foobarba"] = s
+    yield s
+    del server.STATES["foobarba"]
 
 
 async def test_homepage(config, client):
@@ -54,14 +60,6 @@ async def test_reject_bad_state(config, client):
     assert r.json() == {"detail": unittest.mock.ANY}
 
 
-@pytest.fixture
-def state():
-    s = server.State(123, "foobarbaz", "1")
-    server.STATES["foobarba"] = s
-    yield s
-    del server.STATES["foobarba"]
-
-
 async def test_reject_no_code(config, client, state):
     r = await client.get(f"/cb?state={state.state}")
     assert r.status_code == 401
@@ -69,6 +67,14 @@ async def test_reject_no_code(config, client, state):
 
 
 async def test_propagate_errors(config, client, state):
+    r = await client.get(f"/cb?state={state.state}&error=eee")
+    assert r.status_code == 401
+    assert r.json() == {}
+    assert r.json() == {"detail": unittest.mock.ANY}
+
+
+@pytest.mark.skip("need to mock out egress http first")
+async def test_authorization_code(config, client, state):
     r = await client.get(f"/cb?state={state.state}&code=42")
     assert r.status_code == 401
     assert r.json() == {}

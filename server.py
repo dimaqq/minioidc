@@ -137,6 +137,9 @@ async def callback(
     except (KeyError, TypeError):
         raise HTTPException(401, "Ignoring callback because state didn't match")
 
+    # FIXME decide if code and error have same flow:
+    # * either bail early on error, or
+    # * record error and blank tokens
     if not code:
         raise HTTPException(401, "Ignoring callback without code")
 
