@@ -137,6 +137,9 @@ async def callback(
     except (KeyError, TypeError):
         raise HTTPException(401, "Ignoring callback because state didn't match")
 
+    if not code:
+        raise HTTPException(401, "Ignoring callback without code")
+
     async with httpx.AsyncClient() as client:
         try:
             (
