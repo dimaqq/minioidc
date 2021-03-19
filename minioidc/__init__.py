@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, TypedDict
@@ -111,32 +113,36 @@ async def metadata(
     return configuration, keys
 
 
-def _claims(token: Optional[str], keys: dict, provider: Provider) -> Optional[dict]:
+def _claims(token: Optional[str], keys: Keys, provider: Provider) -> Optional[dict]:
     kids = {k["kid"]: k for k in keys["keys"]}
     if not token:
         return
     head = _header(token)
     if not head or head.get("alg") != "ES256" or head.get("kid") not in kids:
         return
-    claims = jwt.decode(
-        token,
-        # https://github.com/jpadilla/pyjwt/issues/603
-        key=jwt.api_jwk.PyJWK({"alg": "ES256", **kids[head["kid"]]}).key,
-        algorithms=["ES256"],  # FIXME what?
-        options=dict(
-            verify_signature=True,
-            require_exp=True,
-            verify_exp=True,
-            verify_iss=True,
-            verify_aud=True,
-            require_iat=False,
-            require_nbf=False,
-        ),
-        issuer=provider.issuer,
-        audience=provider.client_id,
-    )
-    # FIXME additional claims validation
-    return claims
+    try:
+        claims = jwt.decode(
+            token,
+            # https://github.com/jpadilla/pyjwt/issues/603
+            key=jwt.api_jwk.PyJWK({"alg": "ES256", **kids[head["kid"]]}).key,
+            algorithms=["ES256"],  # FIXME what?
+            options=dict(
+                verify_signature=True,
+                require_exp=True,
+                verify_exp=True,
+                verify_iss=True,
+                verify_aud=True,
+                require_iat=False,
+                require_nbf=False,
+            ),
+            issuer=provider.issuer,
+            audience=provider.client_id,
+        )
+        # FIXME additional claims validation
+        return claims
+    except jwt.PyJWTError:
+        logging.exception("FIXME")
+        return
 
 
 def _header(token: str) -> Optional[dict]:
